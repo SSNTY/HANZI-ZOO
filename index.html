@@ -532,8 +532,9 @@ let run = null;
 const chunkOf = (key) => `c${key[0]}-${Math.floor(+key.slice(1) / CHUNK)}`;
 const setStatus = (msg) => { $("status").textContent = msg; };
 function ndToday() {
-  if (!S.nd || S.nd.d !== today()) S.nd = { d: today(), started: [] };
-  if (!S.nd.started) S.nd.started = [];
+  const cur = S.nd;
+  if (!cur || cur.d !== today() || !Array.isArray(cur.started)) S.nd = { d: today(), started: [] };
+  else if (Object.isFrozen(cur) || Object.isFrozen(cur.started)) S.nd = { d: cur.d, started: [...cur.started] };
   return S.nd;
 }
 const countPrefix = (p) => Object.keys(S.c).filter((k) => k[0] === p).length;
@@ -636,10 +637,10 @@ function curVocabLesson() { return VOCAB_LESSONS.find((l) => !lessonDone(l)) || 
 function curGramLesson() { return GRAM_LESSONS.find((l) => !lessonDone(l)) || null; }
 function canStartLesson(type, lesson) {
   if (!lesson) return false;
-  const id = type + lesson.id, nd = ndToday();
-  if (nd.started.includes(id)) return true;
+  const id = type + lesson.id, nd = ndToday(), started = Array.isArray(nd.started) ? nd.started : [];
+  if (started.includes(id)) return true;
   const cap = type === "v" ? S.set.vocabPerDay : S.set.gramPerDay;
-  return nd.started.filter((x) => x[0] === type).length < cap;
+  return started.filter((x) => x[0] === type).length < cap;
 }
 
 /* ================= planificador ================= */
@@ -759,8 +760,7 @@ function renderProgreso() {
 }
 
 function renderHoy() {
-  renderPerfil();
-  renderProgreso();
+  try { renderPerfil(); renderProgreso(); } catch (e) { console.error("perfil/progreso:", e); }
   if (run) { $("setup").hidden = true; $("runbox").hidden = false; renderRun(); return; }
   $("setup").hidden = false; $("runbox").hidden = true;
   const min = +$("min").value;
@@ -908,7 +908,14 @@ document.addEventListener("keydown", (e) => {
   else if (run.revealed && ["1", "2", "3", "4"].includes(e.key)) rateCurrent(+e.key);
 });
 $("min").addEventListener("input", renderHoy);
-$("start").addEventListener("click", () => { buildRun(+$("min").value); renderHoy(); });
+$("start").addEventListener("click", () => {
+  try { buildRun(+$("min").value); renderHoy(); }
+  catch (e) {
+    console.error("empezar sesión:", e);
+    const where = e && e.stack ? e.stack.split("\n").slice(0, 3).join(" | ") : "";
+    $("plan").textContent = "No se pudo empezar la sesión: " + (e && e.message ? e.message : e) + " [" + where + "]. Copia este mensaje y envíamelo.";
+  }
+});
 $("go-tutor").addEventListener("click", () => show("tutor"));
 
 /* ================= tarjetas ================= */
@@ -1113,7 +1120,7 @@ function onDbSnap(snap) {
   let prof = null;
   for (const doc of snap.docs) {
     if (!doc.exists) continue;
-    const d = doc.data() || {};
+    const d = JSON.parse(JSON.stringify(doc.data() || {}));
     if (doc.id === "profile") {
       prof = d;
       S.extra = Object.fromEntries(Object.entries(d).filter(([k]) => !["cards", "set", "nd", "start", "simulacros", "log", "tests", "gen", "migrated"].includes(k)));
